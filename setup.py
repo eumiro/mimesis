@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import json
-import os
 from distutils.core import setup
-from os.path import abspath, dirname, exists, getsize, join, relpath, splitext
+from pathlib import Path
 
 import setuptools
 
@@ -17,12 +16,11 @@ from mimesis import (
     __version__,
 )
 
-here = abspath(dirname(__file__))
+here = Path(__file__).resolve().parent
 
 
 def get_readme():
-    with open('README.rst', 'r', encoding='utf-8') as f:
-        return f.read()
+    return Path('README.rst').read_text()
 
 
 class Minimizer(setuptools.Command):
@@ -33,17 +31,11 @@ class Minimizer(setuptools.Command):
 
     def initialize_options(self):
         """Find all files of all locales."""
-        self.paths = []
         self.separators = (',', ':')
-        self.data_dir = join(here, 'mimesis', 'data')
+        self.data_dir = here / 'mimesis' / 'data'
         self.before_total = 0
         self.after_total = 0
-
-        for root, _, files in os.walk(self.data_dir):
-            for file in sorted(files):
-                if splitext(file)[1] == '.json':
-                    self.paths.append(join(
-                        relpath(root, self.data_dir), file))
+        self.paths = [file.relative_to(self.data_dir) for file in self.data_dir.rglob('*.json')]
 
     def finalize_options(self):
         pass
@@ -57,30 +49,23 @@ class Minimizer(setuptools.Command):
         return '%.1f' % num
 
     def minify(self, file_path):
-        size_before = getsize(file_path)
+        size_before = file_path.stat().st_size
         self.before_total += size_before
         size_before = self.size_of(size_before)
 
-        with open(file_path, 'r', 1) as f:
-            json_text = json.loads(f.read())
-            minimized = json.dumps(
-                json_text, separators=self.separators, ensure_ascii=False)
+        json_text = json.loads(file_path.read_text(buffering=1))
+        minimized = json.dumps(json_text, separators=self.separators, ensure_ascii=False)
 
-        if len(file_path) > 0:
-            output_path = abspath(file_path)
-            abs_path = abspath(dirname(output_path))
-
-            if not exists(abs_path):
-                os.makedirs(abs_path)
-
-            with open(output_path, 'w+', 1) as f:
+        if file_path.parts:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            with file_path.open('w+', 1) as f:
                 f.write(minimized)
 
-        size_after = getsize(file_path)
+        size_after = file_path.stat().st_size
         self.after_total += size_after
         size_after = self.size_of(size_after)
 
-        json_file = '/'.join(file_path.split('/')[-2:])
+        json_file = file_path.relative_to(file_path.parents[1])
 
         template = '\033[34m{}\033[0m : ' \
                    '\033[92mminimized\033[0m : ' \
@@ -92,7 +77,7 @@ class Minimizer(setuptools.Command):
     def run(self):
         """Start json minimizer and exit when all json files were minimized."""
         for rel_path in sorted(self.paths):
-            file_path = join(self.data_dir, rel_path)
+            file_path = self.data_dir / rel_path
             self.minify(file_path)
 
         after = self.size_of(self.after_total)
